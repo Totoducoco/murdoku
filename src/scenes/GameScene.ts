@@ -35,6 +35,7 @@ export default class GameScene extends Phaser.Scene {
     private ui?: Phaser.GameObjects.Container;
     private startedAt = 0;
     private readonly cluePageSize = 6;
+    private mobileTab: "board" | "clues" | "accuse" = "board";
 
     constructor() {
         super("GameScene");
@@ -46,7 +47,19 @@ export default class GameScene extends Phaser.Scene {
 
     create(): void {
         this.cameras.main.setBackgroundColor(COLORS.background);
+        this.scale.on("resize", this.handleResize, this);
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+            this.scale.off("resize", this.handleResize, this);
+        });
         this.startNewCase();
+    }
+
+    private handleResize(): void {
+        if (this.currentCase) this.drawInterface();
+    }
+
+    private isCompactLayout(): boolean {
+        return this.scale.width < 900 || this.scale.height < 650;
     }
 
     private startNewCase(): void {
@@ -68,6 +81,7 @@ export default class GameScene extends Phaser.Scene {
             this.selectedPersonId = this.currentCase.puzzle.people.find(person => person.role === "suspect")?.id ?? null;
             this.selectedAccusedId = null;
             this.cluePage = 0;
+            this.mobileTab = "board";
             this.startedAt = Date.now();
 
             // Les solutions restent en mémoire pour la génération, mais ne sont
@@ -89,6 +103,26 @@ export default class GameScene extends Phaser.Scene {
     }
 
     private drawGenerationError(message: string): void {
+        if (this.isCompactLayout()) {
+            this.ui?.destroy(true);
+            const container = this.add.container(0, 0);
+            this.ui = container;
+            const width = this.scale.width;
+            const height = this.scale.height;
+            const bg = this.add.rectangle(width / 2, height / 2, width, height, COLORS.background, 1);
+            container.add(bg);
+            this.addText(container, width / 2, height * 0.34, "DOSSIER INTROUVABLE", 22, "#f2f5fb", true)
+                .setOrigin(0.5);
+            this.addText(container, width / 2, height * 0.43, "La génération de cette affaire a échoué.", 13, "#e3a0a0", false, 0,
+                { align: "center", wordWrap: { width: width - 40 } }).setOrigin(0.5);
+            this.addText(container, width / 2, height * 0.50, message.slice(0, 160), 10, COLORS.muted, false, 0,
+                { align: "center", wordWrap: { width: width - 40 } }).setOrigin(0.5);
+            this.addButton(container, "RÉESSAYER", 16, height * 0.59, width - 32, 46,
+                () => this.startNewCase(), COLORS.accent, true);
+            this.addButton(container, "RETOUR AU MENU", 16, height * 0.67, width - 32, 44,
+                () => this.scene.start("MenuScene"), 0x53627d, false);
+            return;
+        }
         this.ui?.destroy(true);
         const container = this.add.container(0, 0);
         this.ui = container;
@@ -102,6 +136,10 @@ export default class GameScene extends Phaser.Scene {
 
     private drawInterface(): void {
         if (!this.currentCase) return;
+        if (this.isCompactLayout()) {
+            this.drawMobileInterface();
+            return;
+        }
         this.ui?.destroy(true);
         const container = this.add.container(0, 0);
         this.ui = container;
@@ -132,6 +170,358 @@ export default class GameScene extends Phaser.Scene {
         this.drawClues(container);
         this.drawAccusation(container);
         this.drawStatus(container);
+
+        // Le layout desktop conserve son canevas de référence, mais s'adapte
+        // aux fenêtres plus petites sans rogner les panneaux.
+        const scale = Math.min(this.scale.width / WIDTH, this.scale.height / HEIGHT, 1);
+        container.setScale(scale);
+        container.setPosition(
+            (this.scale.width - WIDTH * scale) / 2,
+            (this.scale.height - HEIGHT * scale) / 2
+        );
+    }
+
+    /** Interface portrait compacte : navigation par onglets pour rester lisible. */
+    private drawMobileInterface(): void {
+        if (!this.currentCase) return;
+        this.ui?.destroy(true);
+        const container = this.add.container(0, 0);
+        this.ui = container;
+
+        const width = this.scale.width;
+        const height = this.scale.height;
+        const puzzle = this.currentCase.puzzle;
+        const profile = DIFFICULTY_PROFILES[this.difficulty];
+
+        const bg = this.add.graphics();
+        bg.fillStyle(COLORS.background, 1);
+        bg.fillRect(0, 0, width, height);
+        bg.fillStyle(0x17233a, 0.42);
+        bg.fillCircle(width * 0.08, 100, Math.min(width * 0.7, 240));
+        bg.fillStyle(0x1c1834, 0.28);
+        bg.fillCircle(width * 0.92, height * 0.82, Math.min(width * 0.8, 260));
+        container.add(bg);
+
+        this.addText(container, 14, 14, "MURDOKU", 20, "#f4f6fb", true, 1.4);
+        this.addText(container, 15, 42, `DOSSIER ${puzzle.id.toUpperCase()}`, 9, "#8291ad", true, 0.8);
+        this.addText(container, 15, 61,
+            `${profile.label.toUpperCase()}  •  ${profile.size} × ${profile.size}  •  ${puzzle.clues.length} indices`,
+            10, profile.accentHex, true
+        );
+        this.addButton(container, "NOUVELLE", width - 154, 14, 86, 34,
+            () => this.startNewCase(), 0x7da7f7, false);
+        this.addButton(container, "MENU", width - 62, 14, 48, 34,
+            () => this.scene.start("MenuScene"), 0x52627e, false);
+
+        this.drawMobileTabs(container, width);
+
+        if (this.mobileTab === "board") {
+            this.drawMobileBoardTab(container, width, height);
+        } else if (this.mobileTab === "clues") {
+            this.drawMobileCluesTab(container, width, height);
+        } else {
+            this.drawMobileAccuseTab(container, width, height);
+        }
+    }
+
+    private drawMobileTabs(container: Phaser.GameObjects.Container, width: number): void {
+        const tabs: Array<{ id: "board" | "clues" | "accuse"; label: string }> = [
+            { id: "board", label: "PLATEAU" },
+            { id: "clues", label: "INDICES" },
+            { id: "accuse", label: "ACCUSATION" }
+        ];
+        const margin = 12;
+        const gap = 6;
+        const buttonWidth = (width - margin * 2 - gap * 2) / 3;
+        tabs.forEach((tab, index) => {
+            this.addButton(container, tab.label, margin + index * (buttonWidth + gap), 88,
+                buttonWidth, 40,
+                () => { this.mobileTab = tab.id; this.drawInterface(); },
+                this.mobileTab === tab.id ? COLORS.accent : 0x52627e,
+                this.mobileTab === tab.id
+            );
+        });
+    }
+
+    private drawMobileBoardTab(
+        container: Phaser.GameObjects.Container,
+        width: number,
+        height: number
+    ): void {
+        if (!this.currentCase) return;
+        const board = this.currentCase.puzzle.board;
+        this.addText(container, 16, 145, "LE PLAN DES LIEUX", 13, "#eaf0fa", true, 0.6);
+        this.addText(container, 16, 164, "Sélectionne un personnage, puis touche une case.", 10, COLORS.muted);
+
+        const gridMax = Math.min(width - 32, height < 700 ? 270 : 430);
+        const cellSize = Math.min(64, gridMax / board.size);
+        const boardWidth = cellSize * board.size;
+        const startX = (width - boardWidth) / 2;
+        const startY = 190;
+        const graphics = this.add.graphics();
+        container.add(graphics);
+
+        for (let row = 0; row < board.size; row++) {
+            for (let col = 0; col < board.size; col++) {
+                const cell = board.cells[row][col];
+                const room = board.rooms.find(item => item.id === cell.roomId);
+                const x = startX + col * cellSize;
+                const y = startY + row * cellSize;
+                const color = room
+                    ? Phaser.Display.Color.HexStringToColor(room.color).color
+                    : 0x596174;
+
+                graphics.fillStyle(color, 0.96);
+                graphics.fillRoundedRect(x + 1.5, y + 1.5, cellSize - 3, cellSize - 3, 6);
+                graphics.lineStyle(1, 0xffffff, 0.18);
+                graphics.strokeRoundedRect(x + 1.5, y + 1.5, cellSize - 3, cellSize - 3, 6);
+
+                const objects = board.objects.filter(object =>
+                    object.position.row === row && object.position.col === col
+                );
+                const object = objects[0];
+                if (objects.some(item => !item.occupiable)) {
+                    graphics.fillStyle(0x0b1020, 0.25);
+                    graphics.fillRoundedRect(x + 3, y + 3, cellSize - 6, cellSize - 6, 5);
+                }
+
+                const hitArea = this.add.rectangle(
+                    x + cellSize / 2, y + cellSize / 2,
+                    cellSize - 2, cellSize - 2, 0xffffff, 0.001
+                ).setInteractive({ useHandCursor: true });
+                hitArea.on("pointerdown", () => this.handleCellClick(row, col));
+                container.add(hitArea);
+
+                if (object) {
+                    const objectLabel = objects.length > 1
+                        ? `${this.getObjectShortName(object.name)} ×${objects.length}`
+                        : this.getObjectShortName(object.name);
+                    this.addText(container, x + cellSize / 2, y + cellSize - 4,
+                        objectLabel, Math.max(7, Math.min(10, cellSize / 6.5)),
+                        object.occupiable ? "#243149" : "#f7f8fb", true
+                    ).setOrigin(0.5, 1);
+                }
+
+                const placed = this.getPersonAt(row, col);
+                if (placed) {
+                    const isVictim = placed.role === "victim";
+                    const cx = x + cellSize / 2;
+                    const cy = y + cellSize / 2 - (object ? 4 : 0);
+                    const radius = Math.min(21, cellSize * 0.28);
+                    const marker = this.add.circle(cx, cy, radius, isVictim ? 0xa84e61 : 0x263b5e)
+                        .setStrokeStyle(2, 0xffffff, 0.95);
+                    container.add(marker);
+                    const personIndex = this.currentCase.puzzle.people
+                        .filter(person => person.role === "suspect")
+                        .findIndex(person => person.id === placed.id);
+                    this.addText(container, cx, cy, isVictim ? "V" : `S${personIndex + 1}`,
+                        Math.max(11, Math.min(15, cellSize / 3.5)), "#ffffff", true
+                    ).setOrigin(0.5);
+                }
+            }
+        }
+
+        // Étiquettes des pièces : une case lisible par pièce.
+        for (const room of board.rooms) {
+            const roomCells: Position[] = [];
+            for (let row = 0; row < board.size; row++) {
+                for (let col = 0; col < board.size; col++) {
+                    if (board.cells[row][col].roomId === room.id) roomCells.push({ row, col });
+                }
+            }
+            const available = roomCells.filter(position =>
+                !board.objects.some(object => object.position.row === position.row && object.position.col === position.col) &&
+                !this.playerPositionsHasCell(position)
+            );
+            const candidates = available.length ? available : roomCells;
+            if (!candidates.length) continue;
+            const target = candidates[Math.floor(candidates.length / 2)];
+            const x = startX + (target.col + 0.5) * cellSize;
+            const y = startY + 12 + target.row * cellSize;
+            const roomColor = Phaser.Display.Color.HexStringToColor(room.color).color;
+            const tagWidth = Math.min(cellSize - 5, Math.max(40, room.name.length * 5.1 + 8));
+            const tag = this.add.rectangle(x, y, tagWidth, 15, 0x111a2b, 0.9)
+                .setStrokeStyle(1, roomColor, 0.9);
+            container.add(tag);
+            this.addText(container, x, y, room.name, 8, "#f5f7fb", true).setOrigin(0.5);
+        }
+
+        // Frontières épaisses entre les pièces.
+        graphics.lineStyle(3, 0x172033, 1);
+        for (let row = 0; row < board.size; row++) {
+            for (let col = 0; col < board.size; col++) {
+                const roomId = board.cells[row][col].roomId;
+                const x = startX + col * cellSize;
+                const y = startY + row * cellSize;
+                if (col === board.size - 1 || roomId !== board.cells[row][col + 1]?.roomId) {
+                    graphics.lineBetween(x + cellSize, y, x + cellSize, y + cellSize);
+                }
+                if (row === board.size - 1 || roomId !== board.cells[row + 1]?.[col]?.roomId) {
+                    graphics.lineBetween(x, y + cellSize, x + cellSize, y + cellSize);
+                }
+            }
+        }
+        graphics.lineStyle(3, 0x2e3d59, 1);
+        graphics.strokeRoundedRect(startX, startY, boardWidth, boardWidth, 5);
+
+        const people = this.currentCase.puzzle.people;
+        const pickerY = startY + boardWidth + 18;
+        this.addText(container, 16, pickerY, "PERSONNAGES À PLACER", 11, "#aab8d0", true, 0.5);
+        const columns = 4;
+        const gap = 6;
+        const margin = 14;
+        const buttonWidth = (width - margin * 2 - gap * (columns - 1)) / columns;
+        const buttonHeight = 37;
+        people.forEach((person, index) => {
+            const col = index % columns;
+            const row = Math.floor(index / columns);
+            const suspectIndex = people.filter(item => item.role === "suspect").findIndex(item => item.id === person.id);
+            const label = person.role === "victim" ? "VICTIME" : `S${suspectIndex + 1}`;
+            const placed = Boolean(this.playerPositions[person.id]);
+            this.addButton(container, `${label}${placed ? " ✓" : ""}`,
+                margin + col * (buttonWidth + gap), pickerY + 18 + row * (buttonHeight + 7),
+                buttonWidth, buttonHeight,
+                () => {
+                    this.selectedPersonId = person.id;
+                    this.statusMessage = `${person.name} sélectionné(e). Touche sa case.`;
+                    this.statusColor = "#c2d1e8";
+                    this.drawInterface();
+                },
+                this.selectedPersonId === person.id ? COLORS.accent : 0x52627e,
+                this.selectedPersonId === person.id
+            );
+        });
+
+        const rows = Math.ceil(people.length / columns);
+        const controlsY = pickerY + 18 + rows * (buttonHeight + 7) + 7;
+        const placedCount = Object.keys(this.playerPositions).length;
+        this.addText(container, 16, controlsY, `${placedCount}/${people.length} personnages placés`, 10, COLORS.muted);
+        this.addButton(container, "EFFACER", 14, controlsY + 22, (width - 34) / 2, 37,
+            () => this.clearSelectedPlacement(), 0x586783, false,
+            !this.selectedPersonId || !this.playerPositions[this.selectedPersonId]
+        );
+        this.addButton(container, "RECOMMENCER", 20 + (width - 34) / 2, controlsY + 22, (width - 34) / 2, 37,
+            () => this.resetPlayerPlacements(), 0x586783, false, placedCount === 0
+        );
+        this.addText(container, 16, controlsY + 72, this.statusMessage, 10, this.statusColor, true, 0, {
+            wordWrap: { width: width - 32 }, lineSpacing: 2
+        });
+    }
+
+    private drawMobileCluesTab(
+        container: Phaser.GameObjects.Container,
+        width: number,
+        height: number
+    ): void {
+        if (!this.currentCase) return;
+        const puzzle = this.currentCase.puzzle;
+        const clues = this.getCluesOrderedBySuspect();
+        const pageSize = height < 700 ? 3 : 4;
+        const pageCount = Math.max(1, Math.ceil(clues.length / pageSize));
+        this.cluePage = Phaser.Math.Clamp(this.cluePage, 0, pageCount - 1);
+        const start = this.cluePage * pageSize;
+        const visible = clues.slice(start, start + pageSize);
+
+        this.addText(container, 16, 148, "CARNET D'ENQUÊTE", 15, "#edf2fa", true, 0.5);
+        this.addText(container, 16, 171, "Les indices sont classés par suspect.", 10, COLORS.muted);
+
+        const x = 12;
+        const cardWidth = width - 24;
+        const cardHeight = height < 700 ? 112 : 108;
+        const gap = 9;
+        const top = 200;
+        visible.forEach((clue, index) => {
+            const y = top + index * (cardHeight + gap);
+            const person = puzzle.people.find(item => item.id === clue.personId);
+            const number = person?.role === "victim"
+                ? "V"
+                : `S${puzzle.people.filter(item => item.role === "suspect").findIndex(item => item.id === person?.id) + 1}`;
+            const card = this.add.rectangle(x + cardWidth / 2, y + cardHeight / 2,
+                cardWidth, cardHeight, 0x1b263a, 1).setStrokeStyle(1, 0x34435f, 1);
+            container.add(card);
+            const badge = this.add.rectangle(x + 28, y + 25, 34, 26, 0x314a70, 1);
+            container.add(badge);
+            this.addText(container, x + 28, y + 25, number, 12, "#f2f5fa", true).setOrigin(0.5);
+            this.addText(container, x + 55, y + 14,
+                `${person?.name ?? "Personnage"}  •  Indice ${start + index + 1}`,
+                11, "#a9c1e8", true
+            );
+            this.addText(container, x + 16, y + 53, clue.description, 13, "#edf2fa", false, 0, {
+                wordWrap: { width: cardWidth - 32 }, lineSpacing: 3
+            });
+        });
+
+        const navY = top + visible.length * (cardHeight + gap) + 10;
+        this.addText(container, width / 2, navY, `${clues.length ? start + 1 : 0}–${Math.min(start + visible.length, clues.length)} / ${clues.length}   •   PAGE ${this.cluePage + 1}/${pageCount}`,
+            10, "#9aa8c0", true).setOrigin(0.5);
+        this.addButton(container, "← PRÉCÉDENTS", 14, navY + 22, (width - 36) / 2, 40,
+            () => { this.cluePage = Math.max(0, this.cluePage - 1); this.drawInterface(); },
+            0x52627e, false, this.cluePage === 0
+        );
+        this.addButton(container, "SUIVANTS →", 22 + (width - 36) / 2, navY + 22, (width - 36) / 2, 40,
+            () => { this.cluePage = Math.min(pageCount - 1, this.cluePage + 1); this.drawInterface(); },
+            0x52627e, false, this.cluePage >= pageCount - 1
+        );
+        this.addText(container, 16, navY + 82, "Astuce : passe d'un onglet à l'autre pour consulter le plateau et accuser un suspect.",
+            10, COLORS.muted, false, 0, { wordWrap: { width: width - 32 } });
+    }
+
+    private drawMobileAccuseTab(
+        container: Phaser.GameObjects.Container,
+        width: number,
+        _height: number
+    ): void {
+        if (!this.currentCase) return;
+        const people = this.currentCase.puzzle.people;
+        const suspects = people.filter(person => person.role === "suspect");
+        const allPlaced = people.every(person => Boolean(this.playerPositions[person.id]));
+        const placedCount = Object.keys(this.playerPositions).length;
+
+        this.addText(container, 16, 150, "VOTRE ACCUSATION", 15, "#edf2fa", true, 0.5);
+        this.addText(container, 16, 176, `${placedCount}/${people.length} personnages placés`, 11, COLORS.muted);
+
+        if (!allPlaced) {
+            const info = this.add.rectangle(width / 2, 245, width - 32, 88, 0x1b263a, 1)
+                .setStrokeStyle(1, 0x34435f, 1);
+            container.add(info);
+            this.addText(container, width / 2, 245,
+                "Place d'abord tous les personnages dans l'onglet PLATEAU.",
+                12, "#d5dfef", true, 0, { align: "center", wordWrap: { width: width - 64 } }
+            ).setOrigin(0.5);
+        } else {
+            this.addText(container, 16, 215, "Qui se trouvait dans la pièce de la victime ?", 12, "#cbd6e9");
+            const columns = 2;
+            const gap = 9;
+            const margin = 14;
+            const buttonWidth = (width - margin * 2 - gap) / 2;
+            const buttonHeight = 50;
+            suspects.forEach((suspect, index) => {
+                const col = index % columns;
+                const row = Math.floor(index / columns);
+                this.addButton(container, suspect.name,
+                    margin + col * (buttonWidth + gap), 250 + row * (buttonHeight + 10),
+                    buttonWidth, buttonHeight,
+                    () => {
+                        this.selectedAccusedId = suspect.id;
+                        this.statusMessage = `Tu accuses ${suspect.name}. Confirme ton enquête.`;
+                        this.statusColor = "#e8cd8a";
+                        this.drawInterface();
+                    },
+                    this.selectedAccusedId === suspect.id ? COLORS.gold : 0x52627e,
+                    this.selectedAccusedId === suspect.id
+                );
+            });
+            const rows = Math.ceil(suspects.length / columns);
+            const buttonY = 250 + rows * (buttonHeight + 10) + 14;
+            this.addButton(container, "VALIDER L'ACCUSATION", 14, buttonY, width - 28, 48,
+                () => this.validateAttempt(), COLORS.accent, true,
+                !this.selectedAccusedId || this.finished
+            );
+            this.addText(container, 16, buttonY + 68, this.statusMessage, 11, this.statusColor, true, 0,
+                { wordWrap: { width: width - 32 } });
+        }
+        this.addButton(container, "RETOUR AU PLATEAU", 14, this.scale.height - 62, width - 28, 44,
+            () => { this.mobileTab = "board"; this.drawInterface(); }, 0x52627e, false);
     }
 
     private drawBackdrop(container: Phaser.GameObjects.Container): void {

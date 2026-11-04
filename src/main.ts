@@ -12,7 +12,9 @@ const config: Phaser.Types.Core.GameConfig = {
     backgroundColor: "#0b1020",
     scene: [MenuScene, GameScene, ResultScene],
     scale: {
-        mode: Phaser.Scale.FIT,
+        // Le canvas suit réellement la taille du navigateur.
+        // Chaque scène choisit ensuite un layout desktop ou mobile.
+        mode: Phaser.Scale.RESIZE,
         autoCenter: Phaser.Scale.CENTER_BOTH,
         width: 1440,
         height: 960

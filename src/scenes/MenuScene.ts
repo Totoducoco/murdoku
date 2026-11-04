@@ -73,10 +73,26 @@ export default class MenuScene extends Phaser.Scene {
     }
 
     create(): void {
+        this.scale.on("resize", this.handleResize, this);
+        this.events.once(Phaser.Scenes.Events.SHUTDOWN, () => {
+            this.scale.off("resize", this.handleResize, this);
+        });
         this.drawMenu();
     }
 
+    private handleResize(): void {
+        this.drawMenu();
+    }
+
+    private isCompactLayout(): boolean {
+        return this.scale.width < 900 || this.scale.height < 650;
+    }
+
     private drawMenu(): void {
+        if (this.isCompactLayout()) {
+            this.drawMobileMenu();
+            return;
+        }
         this.menuContainer?.destroy(true);
         const container = this.add.container(0, 0);
         this.menuContainer = container;
@@ -141,6 +157,102 @@ export default class MenuScene extends Phaser.Scene {
             fontSize: "11px",
             color: "#526078",
             letterSpacing: 2
+        }).setOrigin(0.5);
+
+        const scale = Math.min(this.scale.width / WIDTH, this.scale.height / HEIGHT, 1);
+        container.setScale(scale);
+        container.setPosition(
+            (this.scale.width - WIDTH * scale) / 2,
+            (this.scale.height - HEIGHT * scale) / 2
+        );
+    }
+
+    private drawMobileMenu(): void {
+        this.menuContainer?.destroy(true);
+        const container = this.add.container(0, 0);
+        this.menuContainer = container;
+        const width = this.scale.width;
+        const height = this.scale.height;
+
+        const bg = this.add.graphics();
+        bg.fillStyle(0x0b1020, 1);
+        bg.fillRect(0, 0, width, height);
+        bg.fillStyle(0x17223a, 0.48);
+        bg.fillCircle(width * 0.08, height * 0.12, Math.min(width * 0.7, 230));
+        bg.fillStyle(0x1b1833, 0.36);
+        bg.fillCircle(width * 0.92, height * 0.82, Math.min(width * 0.8, 270));
+        bg.lineStyle(1, 0x293550, 0.24);
+        for (let x = 0; x <= width; x += 32) bg.lineBetween(x, 0, x, height);
+        for (let y = 0; y <= height; y += 32) bg.lineBetween(0, y, width, y);
+        container.add(bg);
+
+        this.addText(container, width / 2, 48, "MURDOKU", {
+            fontSize: "34px", fontStyle: "bold", color: "#f7f8fc", letterSpacing: 3
+        }).setOrigin(0.5);
+        this.addText(container, width / 2, 82, "UNE ENQUÊTE. DES INDICES. UNE SEULE VÉRITÉ.", {
+            fontSize: "9px", color: "#9daac4", letterSpacing: 0.5, align: "center"
+        }).setOrigin(0.5);
+        this.addText(container, width / 2, 133, "CHOISIS TON NIVEAU", {
+            fontSize: "15px", fontStyle: "bold", color: "#e8edf8", letterSpacing: 1
+        }).setOrigin(0.5);
+
+        const profiles = Object.values(DIFFICULTY_PROFILES);
+        const margin = 14;
+        const cardWidth = width - margin * 2;
+        const gap = 8;
+        const cardHeight = Math.max(72, Math.min(88, (height - 330 - gap * 3) / 4));
+        const startY = 158;
+
+        profiles.forEach((profile, index) => {
+            const y = startY + index * (cardHeight + gap);
+            const selected = this.selectedDifficulty === profile.id;
+            const background = this.add.rectangle(
+                width / 2, y + cardHeight / 2, cardWidth, cardHeight,
+                selected ? 0x202d46 : 0x151e31, 1
+            ).setStrokeStyle(selected ? 2.5 : 1, selected ? profile.accent : 0x2e3a53, 1);
+            background.setInteractive({ useHandCursor: true });
+            background.on("pointerdown", () => {
+                this.selectedDifficulty = profile.id;
+                this.drawMenu();
+            });
+            container.add(background);
+
+            const emblem = this.add.circle(margin + 35, y + cardHeight / 2, 22, profile.accent, 0.16)
+                .setStrokeStyle(1.5, profile.accent, 0.85);
+            container.add(emblem);
+            this.addText(container, margin + 35, y + cardHeight / 2, String(profile.size), {
+                fontSize: "19px", fontStyle: "bold", color: profile.accentHex
+            }).setOrigin(0.5);
+            this.addText(container, margin + 70, y + 14, profile.label.toUpperCase(), {
+                fontSize: "14px", fontStyle: "bold", color: "#f3f5fa", letterSpacing: 0.6
+            });
+            this.addText(container, margin + 70, y + 35,
+                `${profile.size} × ${profile.size}  •  ${profile.suspects} suspects  •  ${profile.rooms} pièces`,
+                { fontSize: "10px", color: profile.accentHex }
+            );
+            this.addText(container, margin + 70, y + 54, profile.subtitle, {
+                fontSize: "10px", color: "#9ba8bf"
+            });
+            if (selected) {
+                const check = this.addText(container, width - margin - 18, y + cardHeight / 2, "✓", {
+                    fontSize: "18px", color: profile.accentHex, fontStyle: "bold"
+                }).setOrigin(0.5);
+                container.add(check);
+            }
+        });
+
+        const buttonY = startY + profiles.length * (cardHeight + gap) + 13;
+        const selectedProfile = DIFFICULTY_PROFILES[this.selectedDifficulty];
+        this.addButton(container, "COMMENCER L'ENQUÊTE", 18, buttonY, width - 36, 50,
+            () => this.scene.start("GameScene", { difficulty: this.selectedDifficulty }),
+            selectedProfile.accent, true
+        );
+        this.addText(container, width / 2, buttonY + 70,
+            "1 personne par ligne et par colonne.\nTrouve le suspect dans la pièce de la victime.",
+            { fontSize: "10px", color: "#7f8ba3", align: "center", lineSpacing: 4 }
+        ).setOrigin(0.5);
+        this.addText(container, width / 2, height - 18, "MURDOKU  •  PROTOTYPE", {
+            fontSize: "9px", color: "#526078", letterSpacing: 1.5
         }).setOrigin(0.5);
     }
 

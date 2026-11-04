@@ -51,13 +51,9 @@ function getRoomId(board: Board, position: Position): string | undefined {
     return board.cells[position.row]?.[position.col]?.roomId;
 }
 
-function areBesideInSameRoom(board: Board, a: Position, b: Position): boolean {
-    const distance = Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
-    return (
-        distance === 1 &&
-        getRoomId(board, a) !== undefined &&
-        getRoomId(board, a) === getRoomId(board, b)
-    );
+/** « À côté » signifie une case orthogonalement voisine, même de l'autre côté d'une limite de pièce. */
+function areAdjacent(a: Position, b: Position): boolean {
+    return Math.abs(a.row - b.row) + Math.abs(a.col - b.col) === 1;
 }
 
 function getRelativeDirections(
@@ -89,11 +85,68 @@ function withObjectArticle(name: string): string {
     return `${feminine.has(normalized) ? "la" : "le"} ${normalized}`;
 }
 
+/** Forme complément après « à côté de » ou « près de ». */
+function withDePhrase(phrase: string): string {
+    if (phrase.startsWith("le ")) return `du ${phrase.slice(3)}`;
+    if (phrase.startsWith("la ")) return `de la ${phrase.slice(3)}`;
+    if (phrase.startsWith("l'")) return `de ${phrase}`;
+    if (phrase.startsWith("les ")) return `des ${phrase.slice(4)}`;
+    return `de ${phrase}`;
+}
+
+function withDeObjectArticle(name: string): string {
+    return withDePhrase(withObjectArticle(name));
+}
+
+function normalizeObjectName(name: string): string {
+    return name.trim().toLocaleLowerCase("fr-FR");
+}
+
+/**
+ * Produit un libellé humainement identifiable sans révéler la pièce.
+ * Si le nom de l'objet est en double, on le qualifie par un objet voisin
+ * dont le nom est unique et qui permet d'identifier une seule copie.
+ * Sans qualificatif fiable, l'objet ne pourra pas être utilisé dans un indice.
+ */
+function getObjectPhrase(
+    board: Board,
+    target: Board["objects"][number]
+): string | null {
+    const sameNameObjects = board.objects.filter(
+        object => normalizeObjectName(object.name) === normalizeObjectName(target.name)
+    );
+
+    const basePhrase = withObjectArticle(target.name);
+    if (sameNameObjects.length <= 1) return basePhrase;
+
+    const uniqueAnchors = board.objects.filter(anchor => {
+        if (anchor.id === target.id) return false;
+        const sameAnchorNameCount = board.objects.filter(
+            object => normalizeObjectName(object.name) === normalizeObjectName(anchor.name)
+        ).length;
+        return sameAnchorNameCount === 1 && areAdjacent(target.position, anchor.position);
+    });
+
+    for (const anchor of uniqueAnchors) {
+        const matchingCopies = sameNameObjects.filter(copy =>
+            areAdjacent(copy.position, anchor.position)
+        );
+
+        if (matchingCopies.length === 1 && matchingCopies[0].id === target.id) {
+            return `${basePhrase} près ${withDeObjectArticle(anchor.name)}`;
+        }
+    }
+
+    // Ne pas créer d'indice impossible à distinguer visuellement.
+    return null;
+}
+
 function describeRule(
     board: Board,
     person: Person,
     rule: ClueRule,
-    peopleById: Map<string, Person>
+    peopleById: Map<string, Person>,
+    objectPhrases: Map<string, string | null>
 ): string {
     switch (rule.type) {
         case "in-room":
@@ -103,12 +156,14 @@ function describeRule(
         case "on-object": {
             const object = board.objects.find(item => item.id === rule.objectId);
             if (!object) return `${person.name} se trouvait sur un meuble.`;
-            return `${person.name} se trouvait sur ${withObjectArticle(object.name)}.`;
+            const phrase = objectPhrases.get(object.id) ?? withObjectArticle(object.name);
+            return `${person.name} se trouvait sur ${phrase}.`;
         }
         case "beside-object": {
             const object = board.objects.find(item => item.id === rule.objectId);
             if (!object) return `${person.name} se trouvait juste à côté d'un objet.`;
-            return `${person.name} se trouvait juste à côté de ${withObjectArticle(object.name)}.`;
+            const phrase = objectPhrases.get(object.id) ?? withObjectArticle(object.name);
+            return `${person.name} se trouvait juste à côté ${withDePhrase(phrase)}.`;
         }
         case "same-room-as":
             return `${person.name} se trouvait dans la même pièce que ${peopleById.get(rule.personId)?.name ?? rule.personId}.`;
@@ -173,12 +228,15 @@ function buildCandidates(
     const candidates: ClueCandidate[] = [];
     const peopleById = new Map(people.map(person => [person.id, person]));
     const suspects = people.filter(person => person.role === "suspect");
+    const objectPhrases = new Map<string, string | null>(
+        board.objects.map(object => [object.id, getObjectPhrase(board, object)] as const)
+    );
 
     const add = (person: Person, rule: ClueRule, weight: number): void => {
         const clue: Clue = {
             id: `clue-${person.id}-${candidates.length + 1}`,
             personId: person.id,
-            description: describeRule(board, person, rule, peopleById),
+            description: describeRule(board, person, rule, peopleById, objectPhrases),
             rule
         };
         candidates.push({ clue, weight });
@@ -191,6 +249,11 @@ function buildCandidates(
         // Les objets sont explorés en priorité. Chaque objet est ciblé par son
         // objectId : plusieurs « Tables » peuvent donc coexister comme leurres.
         for (const object of board.objects) {
+            // Une copie d'objet doit être identifiable dans le texte.
+            // Les doublons restent sur le plateau, mais un indice ne cible
+            // une copie que si un objet voisin unique permet de la distinguer.
+            if (!objectPhrases.get(object.id)) continue;
+
             const samePosition =
                 object.position.row === position.row &&
                 object.position.col === position.col;
@@ -198,7 +261,7 @@ function buildCandidates(
             if (samePosition && object.occupiable) {
                 // Un indice d'occupation exacte reste rare, car il est très révélateur.
                 add(person, { type: "on-object", objectId: object.id }, 2.8);
-            } else if (areBesideInSameRoom(board, position, object.position)) {
+            } else if (areAdjacent(position, object.position)) {
                 // Les indices de proximité deviennent la principale source d'indices mobilier.
                 add(person, { type: "beside-object", objectId: object.id }, 0.15);
             }
@@ -225,7 +288,7 @@ function buildCandidates(
                 1.7
             );
 
-            if (areBesideInSameRoom(board, position, otherPosition)) {
+            if (areAdjacent(position, otherPosition)) {
                 add(person, { type: "beside-person", personId: other.id }, 1.9);
             }
 

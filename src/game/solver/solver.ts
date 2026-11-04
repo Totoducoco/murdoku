@@ -40,12 +40,10 @@ function getDistance(a: Position, b: Position): number {
     return Math.abs(a.row - b.row) + Math.abs(a.col - b.col);
 }
 
-function areBeside(board: Board, a: Position, b: Position): boolean {
-    return (
-        getDistance(a, b) === 1 &&
-        getRoomId(board, a) !== undefined &&
-        getRoomId(board, a) === getRoomId(board, b)
-    );
+function areBeside(_board: Board, a: Position, b: Position): boolean {
+    // « À côté » = une case orthogonale voisine. La séparation entre pièces
+    // ne change pas la proximité, conformément au texte de l'indice affiché.
+    return getDistance(a, b) === 1;
 }
 
 function isCellOccupable(board: Board, position: Position): boolean {

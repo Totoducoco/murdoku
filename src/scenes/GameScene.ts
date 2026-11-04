@@ -934,9 +934,9 @@ export default class GameScene extends Phaser.Scene {
             p.row >= 0 && p.row < board.size && p.col >= 0 && p.col < board.size;
         const roomAt = (p: Position): string | null =>
             inBounds(p) ? board.cells[p.row]?.[p.col]?.roomId ?? null : null;
-        const besideSameRoom = (a: Position, b: Position): boolean =>
-            Math.abs(a.row - b.row) + Math.abs(a.col - b.col) === 1 &&
-            roomAt(a) !== null && roomAt(a) === roomAt(b);
+        const areAdjacent = (a: Position, b: Position): boolean =>
+            inBounds(a) && inBounds(b) &&
+            Math.abs(a.row - b.row) + Math.abs(a.col - b.col) === 1;
 
         const rows = new Set<number>();
         const cols = new Set<number>();
@@ -984,7 +984,7 @@ export default class GameScene extends Phaser.Scene {
                     satisfied = Boolean(this.playerPositions[rule.personId] && roomAt(position) !== roomAt(this.playerPositions[rule.personId]));
                     break;
                 case "beside-person":
-                    satisfied = Boolean(this.playerPositions[rule.personId] && besideSameRoom(position, this.playerPositions[rule.personId]));
+                    satisfied = Boolean(this.playerPositions[rule.personId] && areAdjacent(position, this.playerPositions[rule.personId]));
                     break;
                 case "relative-to-person": {
                     const other = this.playerPositions[rule.personId];
@@ -1004,7 +1004,7 @@ export default class GameScene extends Phaser.Scene {
                 }
                 case "beside-object": {
                     const object = board.objects.find(item => item.id === rule.objectId);
-                    satisfied = Boolean(object && besideSameRoom(position, object.position));
+                    satisfied = Boolean(object && areAdjacent(position, object.position));
                     break;
                 }
                 case "on-row":

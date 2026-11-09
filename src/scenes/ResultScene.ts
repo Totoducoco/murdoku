@@ -41,15 +41,14 @@ export default class ResultScene extends Phaser.Scene {
         const container = this.add.container(0, 0);
         this.container = container;
 
-        if (this.scale.width < 900 || this.scale.height < 650) {
+        if (this.scale.width < DESIGN_WIDTH || this.scale.height < DESIGN_HEIGHT) {
             this.drawMobile(container);
         } else {
             this.drawDesktop(container);
-            const scale = Math.min(this.scale.width / DESIGN_WIDTH, this.scale.height / DESIGN_HEIGHT, 1);
-            container.setScale(scale);
+            // Centrage sans scale fractionnaire : le texte reste net.
             container.setPosition(
-                (this.scale.width - DESIGN_WIDTH * scale) / 2,
-                (this.scale.height - DESIGN_HEIGHT * scale) / 2
+                Math.round((this.scale.width - DESIGN_WIDTH) / 2),
+                Math.round((this.scale.height - DESIGN_HEIGHT) / 2)
             );
         }
     }
@@ -108,7 +107,7 @@ export default class ResultScene extends Phaser.Scene {
 
         const cardWidth = Math.min(width - 28, 520);
         const centerX = width / 2;
-        const top = Math.max(18, (height - 650) / 2);
+        const top = Math.max(12, Math.floor((height - 642) / 2));
         const card = this.add.rectangle(centerX, height / 2, cardWidth, Math.min(height - 24, 650), 0x151f32, 1)
             .setStrokeStyle(1, 0x3b4e70, 1);
         container.add(card);

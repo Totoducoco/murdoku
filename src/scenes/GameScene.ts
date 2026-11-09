@@ -58,8 +58,13 @@ export default class GameScene extends Phaser.Scene {
         if (this.currentCase) this.drawInterface();
     }
 
+    /**
+     * En dessous de la taille native du layout desktop, on passe sur
+     * l'interface à onglets. Cela évite de réduire tout le texte avec
+     * un scale fractionnaire sur les tablettes et les petits portables.
+     */
     private isCompactLayout(): boolean {
-        return this.scale.width < 900 || this.scale.height < 650;
+        return this.scale.width < WIDTH || this.scale.height < HEIGHT;
     }
 
     private startNewCase(): void {
@@ -132,6 +137,10 @@ export default class GameScene extends Phaser.Scene {
         this.addText(container, WIDTH / 2, 430, message.slice(0, 160), 13, COLORS.muted).setOrigin(0.5);
         this.addButton(container, "RÉESSAYER", 510, 520, 180, 52, () => this.startNewCase(), COLORS.accent, true);
         this.addButton(container, "RETOUR AU MENU", 730, 520, 200, 52, () => this.scene.start("MenuScene"), 0x53627d, false);
+        container.setPosition(
+            Math.round((this.scale.width - WIDTH) / 2),
+            Math.round((this.scale.height - HEIGHT) / 2)
+        );
     }
 
     private drawInterface(): void {
@@ -171,13 +180,11 @@ export default class GameScene extends Phaser.Scene {
         this.drawAccusation(container);
         this.drawStatus(container);
 
-        // Le layout desktop conserve son canevas de référence, mais s'adapte
-        // aux fenêtres plus petites sans rogner les panneaux.
-        const scale = Math.min(this.scale.width / WIDTH, this.scale.height / HEIGHT, 1);
-        container.setScale(scale);
+        // Le layout desktop garde sa taille native : on le centre sans le
+        // redimensionner. Le texte et les traits restent nets à 100 %.
         container.setPosition(
-            (this.scale.width - WIDTH * scale) / 2,
-            (this.scale.height - HEIGHT * scale) / 2
+            Math.round((this.scale.width - WIDTH) / 2),
+            Math.round((this.scale.height - HEIGHT) / 2)
         );
     }
 
@@ -253,7 +260,9 @@ export default class GameScene extends Phaser.Scene {
         this.addText(container, 16, 145, "LE PLAN DES LIEUX", 13, "#eaf0fa", true, 0.6);
         this.addText(container, 16, 164, "Sélectionne un personnage, puis touche une case.", 10, COLORS.muted);
 
-        const gridMax = Math.min(width - 32, height < 700 ? 270 : 430);
+        // Réserve une hauteur suffisante aux boutons et au statut sous la grille.
+        // La taille est calculée depuis le viewport réel, sans mise à l'échelle.
+        const gridMax = Math.max(190, Math.min(width - 32, 430, height - 445));
         const cellSize = Math.min(64, gridMax / board.size);
         const boardWidth = cellSize * board.size;
         const startX = (width - boardWidth) / 2;
